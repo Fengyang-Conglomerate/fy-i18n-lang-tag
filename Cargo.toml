@@ -1,0 +1,24 @@
+[package]
+name = "fy-i18n-lang-tag"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Lightweight modern language-tag parsing and normalization with no_std and no dependencies by default"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bcp47", "rfc5646", "language-tag", "i18n", "localization"]
+categories = ["internationalization", "localization", "parser-implementations"]
+repository = "https://github.com/Fengyang-Conglomerate/fy-i18n-lang-tag"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+serde = { version = "1", default-features = false, optional = true, features = ["alloc"] }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dev-dependencies]
+serde_json = "1"

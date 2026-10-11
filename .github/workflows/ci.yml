@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.toolchain }}, ${{ matrix.features }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.98.0", stable]
+        features: ["--no-default-features", "--all-features"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal
+      - name: Test library, integration tests, and documentation
+        run: cargo +${{ matrix.toolchain }} test --locked ${{ matrix.features }}
+      - name: Build library for standalone README tests
+        run: cargo +${{ matrix.toolchain }} build --locked ${{ matrix.features }}
+      - name: Test Chinese README examples
+        run: >-
+          rustdoc +${{ matrix.toolchain }} --test README.zh-CN.md --edition=2024
+          --extern fy_i18n_lang_tag=target/debug/libfy_i18n_lang_tag.rlib
+          -L dependency=target/debug/deps
+
+  quality:
+    name: Format, Clippy, and documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: cargo +stable fmt --all -- --check
+      - run: cargo +stable clippy --locked --all-targets --no-default-features -- -D warnings
+      - run: cargo +stable clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo +stable doc --locked --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Validate package contents and build
+        run: cargo +stable package --locked
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust and LLVM tools
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      - name: Collect coverage for both feature sets
+        run: |
+          cargo +stable llvm-cov clean --workspace
+          cargo +stable llvm-cov --locked --no-default-features --no-report
+          cargo +stable llvm-cov --locked --all-features --no-report
+          mkdir -p target/coverage
+          cargo +stable llvm-cov report --lcov --ignore-filename-regex '/tests/' --output-path target/coverage/lcov.info
+          cargo +stable llvm-cov report --summary-only --ignore-filename-regex '/tests/'
+      # Use the read-only, short-lived GitHub Actions token; no repository secret is needed.
+      - name: Upload coverage to Coveralls
+        if: github.event.repository.private == false
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2
+        with:
+          github-token: ${{ github.token }}
+          file: target/coverage/lcov.info
+          format: lcov
+          flag-name: unittests
+          fail-on-error: true
+
+  no-std:
+    name: no_std (${{ matrix.target }}, ${{ matrix.features }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm32-unknown-unknown, thumbv7m-none-eabi]
+        features: ["--no-default-features", "--all-features"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust and target
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+      - name: Check without the standard library
+        run: cargo +stable check --locked --lib --target ${{ matrix.target }} ${{ matrix.features }}
