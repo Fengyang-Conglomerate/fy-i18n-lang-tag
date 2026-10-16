@@ -4,121 +4,139 @@
 [![docs.rs](https://docs.rs/fy-i18n-lang-tag/badge.svg)](https://docs.rs/fy-i18n-lang-tag)
 [![CI](https://github.com/Fengyang-Conglomerate/fy-i18n-lang-tag/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Fengyang-Conglomerate/fy-i18n-lang-tag/actions/workflows/ci.yml)
 [![Coverage](https://coveralls.io/repos/github/Fengyang-Conglomerate/fy-i18n-lang-tag/badge.svg?branch=main)](https://coveralls.io/github/Fengyang-Conglomerate/fy-i18n-lang-tag?branch=main)
-[![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-blue)](https://www.rust-lang.org/)
-[![no_std + alloc](https://img.shields.io/badge/no__std-alloc-green)](#范围)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-blue)](https://www.rust-lang.org/)
+[![no_std](https://img.shields.io/badge/no__std-compatible-green)](#特性标志)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#许可)
 
 [English](README.md) | 简体中文
 
-基于 [RFC 5646](https://www.rfc-editor.org/rfc/rfc5646) 语法子集的轻量现代语言标签
-解析与规范化库。支持 `no_std`，需要 `alloc`；未启用 `serde` 特性时无依赖。
+基于 [RFC 5646](https://www.rfc-editor.org/rfc/rfc5646) 标准的轻量级、高性能、`no_std` 优先的 BCP 47 语言标签解析、规范化与匹配库。
 
-## 范围
+## 特性
 
-- 仅做**语法校验**（well-formedness）：不携带 IANA 注册表、不做
-  Preferred-Value 替换、不折叠 extlang、不查询历史保留标签（grandfathered）清单。
-  注册表级校验（validity）需要由调用方另行处理。
-- 主语言子标签接受 2–3 或 5–8 个 ASCII 字母，拒绝 extlang 子标签与
-  4 字母的保留主语言形式。
-- 解析即规范化：语言全小写、文字首字母大写、地区全大写、其余子标签全小写，
-  扩展序列按 singleton 字典序排列，变体保留输入顺序。不保留输入的原始大小写。
-- 输入未包含的文字或地区在解析结果中为 `None`，不推断或补全。
-- 拒绝 `en_US`、`en_US.UTF-8`、`de_DE@euro` 等 POSIX locale 形式。
+- **默认零堆分配**：全面支持裸机 `no_std` 环境。核心三元组紧凑存储于 15 字节栈缓冲区 `[u8; 15]`，动态扩展字段默认采用可配置定长栈存储（[`Fixed<32>`]）。
+- **零成本借用视图**：提供借用视图（[`NormalTagView`] 与 [`PrivateUseTagView`]），支持在 `const` 编译期常量上下文中完成解析。
+- **预索引即时投影**：拥有型结构内置边界索引，借出借用视图无需重新进行字符串语法解析。
+- **强类型二元体系**：清晰分离普通语言标签（[`NormalTag`]）与全私用标签（[`PrivateUseTag`]），无额外枚举判别开销。
+- **语法验证与规范化**：
+  - 全 ASCII 规范大小写（主语言全小写、文字首字母大写、地区全大写、扩展全小写）。
+  - 单字母扩展严格按 singleton 字典序升序排列（例如 `t-` 位于 `u-` 之前）。
+  - 完整支持 RFC 5646 4ALPHA 保留语言产生式（例如 `root`、`abcd`）。
+  - 深入支持 Unicode 语言环境扩展（`u`，RFC 6067）与转换内容扩展（`t`，RFC 6497）的语法验证与结构化视图。
+- **语法级匹配与回退**：
+  - 确定性六级匹配质量（[`MatchQuality`]）：`Exact` > `CoreExact` > `LanguageScript` > `LanguageRegion` > `Language` > `NoMatch`。
+  - 多请求优先级匹配（[`match_languages`])。
+  - 惰性、零分配的组件级回退迭代器（[`StructuralFallbackIter`]）。
+- **可选 `serde` 与 `alloc` 支持**：
+  - 可选 `alloc` 特性支持无界动态堆存储（[`Grow`]）。
+  - 可选 `serde` 特性支持零拷贝借用反序列化（`#[serde(borrow)]`）。
 
-## 使用
+## 更新日志
 
-需要 Rust 1.98 或更新版本。
+参见[中文更新日志](CHANGELOG.zh-CN.md)或 [English changelog](CHANGELOG.md)。解析检查所支持的语法，不检查 IANA 注册有效性，也不执行完整的 Unicode 语言环境规范化。
+
+## 安装
+
+在 `Cargo.toml` 中添加依赖：
 
 ```toml
 [dependencies]
-fy-i18n-lang-tag = "0.1"
+fy-i18n-lang-tag = "0.2"
 ```
 
-包含主语言子标签时使用 `NormalTag`：
+若需启用动态堆存储与 `serde` 支持：
+
+```toml
+[dependencies]
+fy-i18n-lang-tag = { version = "0.2", features = ["alloc", "serde"] }
+```
+
+## 快速上手
+
+### 普通语言标签
 
 ```rust
 use fy_i18n_lang_tag::NormalTag;
 
-let tag = NormalTag::parse("ZH-hans-cn-u-ca-buddhist-x-note")?;
+// 解析并规范化大小写与扩展顺序
+let tag: NormalTag = NormalTag::parse("ZH-hans-cn-u-ca-gregory-t-it")?;
 
-assert_eq!(tag.to_string(), "zh-Hans-CN-u-ca-buddhist-x-note");
+assert_eq!(tag.to_string(), "zh-Hans-CN-t-it-u-ca-gregory");
 assert_eq!(tag.language().as_str(), "zh");
-assert_eq!(tag.script().unwrap().as_str(), "Hans");
-assert_eq!(tag.region().unwrap().as_str(), "CN");
-assert_eq!(tag.extensions()[0].singleton(), 'u');
-assert_eq!(tag.private_use().len(), 1);
-# Ok::<(), fy_i18n_lang_tag::ParseError>(())
+assert_eq!(tag.script(), Some("Hans"));
+assert_eq!(tag.region(), Some("CN"));
+
+// 结构化扩展视图
+let u_ext = tag.u().unwrap();
+assert_eq!(u_ext.keyword_type("ca"), Some("gregory"));
+
+let t_ext = tag.t().unwrap();
+assert_eq!(t_ext.source_language(), Some("it"));
+# Ok::<(), fy_i18n_lang_tag::TagError>(())
 ```
 
-还需要支持纯私用标签（`x-...`）时使用 `Tag`：
+### 编译期 `const` 借用视图
 
 ```rust
-use fy_i18n_lang_tag::Tag;
+use fy_i18n_lang_tag::NormalTagView;
 
-match Tag::parse("x-pig-latin")? {
-    Tag::PrivateUse(tag) => assert_eq!(tag.to_string(), "x-pig-latin"),
-    _ => unreachable!(),
-}
-# Ok::<(), fy_i18n_lang_tag::ParseError>(())
+const DEFAULT_LANG: NormalTagView<'static> = match NormalTagView::parse("en-US") {
+    Ok(tag) => tag,
+    Err(_) => unreachable!(),
+};
+
+assert_eq!(DEFAULT_LANG.language().as_str(), "en");
+assert_eq!(DEFAULT_LANG.region(), Some("US"));
 ```
 
-`ParseError` 区分错误类别，其 `position` 是输入中从 0 开始的字节偏移：
+### 全私用语言标签
 
 ```rust
-use fy_i18n_lang_tag::{NormalTag, ParseError};
+use fy_i18n_lang_tag::PrivateUseTag;
 
-assert_eq!(
-    NormalTag::parse("zh_CN"),
-    Err(ParseError::InvalidCharacter { position: 2 })
-);
+let priv_tag: PrivateUseTag = PrivateUseTag::parse("x-custom-engine")?;
+assert_eq!(priv_tag.as_str(), "custom-engine");
+assert_eq!(priv_tag.to_string(), "x-custom-engine");
+# Ok::<(), fy_i18n_lang_tag::private_use::TagError>(())
 ```
 
-## 校验与规范化
+### 结构化语言匹配
 
-解析成功表示输入符合本库支持的语法，不代表子标签已经注册，也不代表其组合适用于
-实际语言场景。符合所支持语法的历史保留标签（如 `art-lojban`）按字面解析，
-不应用注册表中的映射。
+```rust
+use fy_i18n_lang_tag::{NormalTag, match_languages, MatchQuality};
 
-扩展由一个非 `x` 的 ASCII 字母或数字（singleton，不区分大小写）引导，后接一个或多个
-由 2–8 个 ASCII 字母或数字组成的子标签。本库不应用各扩展的专有规则，
-包括 Unicode `u`、`t` 扩展的语义校验和规范化。规范化仅包含上述大小写处理
-与扩展排序，不等同于完整的注册表级或 Unicode locale 规范化。
+let requests: [NormalTag; 2] = [
+    NormalTag::parse("zh-Hans")?, // 优先 1：简体中文
+    NormalTag::parse("en")?,      // 优先 2：英文
+];
 
-解析器不对总长度或子标签数量设置固定上限，在可用内存允许的情况下支持超过
-255 字节的标签。
+let available: [NormalTag; 2] = [
+    NormalTag::parse("en-US")?,
+    NormalTag::parse("zh-Hans-CN")?,
+];
 
-`NormalTag::from_parts` 从已校验的组件类型构造标签，遇到重复变体或重复扩展
-singleton 时返回 `BuildError`。`Extension::new` 和 `PrivateUseTag::new` 也使用
-`BuildError` 报告非法组件组合。构造错误描述组件值或序列索引；只有字符串解析
-使用带输入字节偏移的 `ParseError`。解析、组件构造和派生变换保持相同的不变量，
-其输出再次解析后仍得到相同的值。
-
-## 诊断与排序
-
-词法校验先于语法校验。扫描从左向右进行，遇到非法字符即报告，在分隔符或输入
-结尾检查空子标签和过长子标签；首先检测到的词法错误优先。语法错误取决于解析
-入口和仍可使用的语法位置。例如，完整标签中的第二个 singleton 会开始新的扩展，
-但单个 `Extension` 的解析入口会将其视为多余子标签。`PrivateUseTag::parse` 在
-词法校验后要求 `x` 前缀，缺失时报告 `MissingPrivateUsePrefix`。
-
-排序采用结构顺序，而非输出字符串顺序。`NormalTag` 依次比较语言、文字、地区、
-变体、扩展和私用序列；`None` 排在 `Some` 前，序列按元素字典序比较。因此
-`en-US` 排在 `en-Latn` 前。`Tag` 将普通标签排在纯私用标签前。
-
-## 可选 Serde 支持
-
-启用 `serde` 特性后，全部核心类型（`Tag`、`NormalTag`、`PrivateUseTag`、`Extension`
-及五种原子子标签类型）均支持字符串序列化与反序列化。序列化使用 `Display`
-输出的规范化形式，反序列化通过 `parse` 校验并规范化：
-
-```toml
-[dependencies]
-fy-i18n-lang-tag = { version = "0.1", features = ["serde"] }
+let matched = match_languages(&requests, &available).unwrap();
+assert_eq!(matched.request_index(), 0); // 命中 zh-Hans
+assert_eq!(matched.candidate().to_string(), "zh-Hans-CN");
+assert_eq!(matched.quality(), MatchQuality::LanguageScript);
+# Ok::<(), fy_i18n_lang_tag::TagError>(())
 ```
+
+## 特性标志
+
+| 特性 | 默认开启 | 说明 |
+|---|---|---|
+| `alloc` | 否 | 启用基于堆分配的 [`Grow`] 存储后端，支持无上限扩展。 |
+| `serde` | 否 | 为各标签与视图提供 `Serialize` 与 `Deserialize` 支持。 |
+| `unsafe` | 否 | 启用不检查的底层字符串转换，提供极致投影吞吐。 |
+
+## MSRV
+
+最低支持的 Rust 版本（MSRV）为 **Rust 1.86.0**。
 
 ## 许可
 
-可选择以下任一许可证使用：
+可根据您的意愿选择以下任一许可证授权：
 
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT license](LICENSE-MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))

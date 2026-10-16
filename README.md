@@ -4,134 +4,141 @@
 [![docs.rs](https://docs.rs/fy-i18n-lang-tag/badge.svg)](https://docs.rs/fy-i18n-lang-tag)
 [![CI](https://github.com/Fengyang-Conglomerate/fy-i18n-lang-tag/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Fengyang-Conglomerate/fy-i18n-lang-tag/actions/workflows/ci.yml)
 [![Coverage](https://coveralls.io/repos/github/Fengyang-Conglomerate/fy-i18n-lang-tag/badge.svg?branch=main)](https://coveralls.io/github/Fengyang-Conglomerate/fy-i18n-lang-tag?branch=main)
-[![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-blue)](https://www.rust-lang.org/)
-[![no_std + alloc](https://img.shields.io/badge/no__std-alloc-green)](#scope)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-blue)](https://www.rust-lang.org/)
+[![no_std](https://img.shields.io/badge/no__std-compatible-green)](#features)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 English | [简体中文](README.zh-CN.md)
 
-A lightweight parser and normalizer for modern language tags based on a subset
-of [RFC 5646](https://www.rfc-editor.org/rfc/rfc5646). The crate supports `no_std`,
-requires `alloc`, and has no dependencies unless the `serde` feature is enabled.
+Lightweight, high-performance, and `no_std`-first BCP 47 language tag parser, normalizer, and matcher based on [RFC 5646](https://www.rfc-editor.org/rfc/rfc5646).
 
-## Scope
+## Features
 
-- **Syntax only (well-formedness):** no IANA registry, preferred-value
-  replacement, extlang collapsing, or grandfathered-tag lookup. Registry-based
-  validity checking must be handled separately.
-- The primary language subtag consists of 2-3 or 5-8 ASCII letters. Extlang
-  subtags and reserved four-letter primary language subtags are rejected.
-- Parsing normalizes casing: lowercase language, title-case script, uppercase
-  region, and lowercase remaining subtags. Extensions are sorted by singleton.
-  Original input casing is not preserved; variant order is preserved.
-- Missing script and region subtags remain `None`. The parser never infers or
-  inserts them.
-- POSIX locale forms such as `en_US`, `en_US.UTF-8`, and `de_DE@euro` are rejected.
+- **Zero-Allocation by Default**: Runs in bare-metal `no_std` environments with zero heap allocation. Powered by a compact 15-byte stack buffer `[u8; 15]` for core subtags and configurable stack storage ([`Fixed<32>`]) for dynamic extensions.
+- **Zero-Cost Borrowed Views**: Zero-copy borrowed views ([`NormalTagView`], [`PrivateUseTagView`]) callable in `const` compile-time contexts.
+- **Pre-Indexed Projections**: Owned tags maintain internal boundary indices, enabling instant zero-cost view projections without re-parsing.
+- **Strongly-Typed Binary System**: Clear separation between normal tags ([`NormalTag`]) and pure private-use tags ([`PrivateUseTag`]) without dynamic enum overhead.
+- **Syntax validation and normalization**:
+  - Full ASCII canonical casing (lowercase language, Titlecase script, uppercase region, lowercase extensions).
+  - Single-letter extensions sorted lexicographically by singleton (e.g. `t-` before `u-`).
+  - RFC 5646 4ALPHA reserved grammar support (e.g., `root`, `abcd`).
+  - Deep validation and dedicated views for Unicode locale extensions (`u`, RFC 6067) and transformed content extensions (`t`, RFC 6497).
+- **Structural Matching & Fallback**:
+  - Deterministic 6-level syntax-level match quality ([`MatchQuality`]): `Exact` > `CoreExact` > `LanguageScript` > `LanguageRegion` > `Language` > `NoMatch`.
+  - Multi-request priority matching ([`match_languages`]).
+  - Lazy, zero-allocation component fallback iterator ([`StructuralFallbackIter`]).
+- **Optional `serde` & `alloc` Support**:
+  - Optional `alloc` feature for unbounded heap storage ([`Grow`]).
+  - Optional `serde` feature supporting zero-copy borrowed deserialization (`#[serde(borrow)]`).
 
-## Usage
+## Changelog
 
-Requires Rust 1.98 or newer.
+See [English changelog](CHANGELOG.md) or [简体中文更新日志](CHANGELOG.zh-CN.md). Parsing checks supported syntax, not IANA registration or complete Unicode locale canonicalization.
+
+## Installation
+
+Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fy-i18n-lang-tag = "0.1"
+fy-i18n-lang-tag = "0.2"
 ```
 
-Use `NormalTag` for tags with a primary language subtag:
+To enable dynamic heap storage and `serde`:
+
+```toml
+[dependencies]
+fy-i18n-lang-tag = { version = "0.2", features = ["alloc", "serde"] }
+```
+
+## Quick Start
+
+### Normal Language Tags
 
 ```rust
 use fy_i18n_lang_tag::NormalTag;
 
-let tag = NormalTag::parse("ZH-hans-cn-u-ca-buddhist-x-note")?;
+// Parses and normalizes casing and extension order
+let tag: NormalTag = NormalTag::parse("ZH-hans-cn-u-ca-gregory-t-it")?;
 
-assert_eq!(tag.to_string(), "zh-Hans-CN-u-ca-buddhist-x-note");
+assert_eq!(tag.to_string(), "zh-Hans-CN-t-it-u-ca-gregory");
 assert_eq!(tag.language().as_str(), "zh");
-assert_eq!(tag.script().unwrap().as_str(), "Hans");
-assert_eq!(tag.region().unwrap().as_str(), "CN");
-assert_eq!(tag.extensions()[0].singleton(), 'u');
-assert_eq!(tag.private_use().len(), 1);
-# Ok::<(), fy_i18n_lang_tag::ParseError>(())
+assert_eq!(tag.script(), Some("Hans"));
+assert_eq!(tag.region(), Some("CN"));
+
+// Structured extension views
+let u_ext = tag.u().unwrap();
+assert_eq!(u_ext.keyword_type("ca"), Some("gregory"));
+
+let t_ext = tag.t().unwrap();
+assert_eq!(t_ext.source_language(), Some("it"));
+# Ok::<(), fy_i18n_lang_tag::TagError>(())
 ```
 
-Use `Tag` when private-use-only tags (`x-...`) are also needed:
+### Zero-Copy Borrowed Views in `const` Contexts
 
 ```rust
-use fy_i18n_lang_tag::Tag;
+use fy_i18n_lang_tag::NormalTagView;
 
-match Tag::parse("x-pig-latin")? {
-    Tag::PrivateUse(tag) => assert_eq!(tag.to_string(), "x-pig-latin"),
-    _ => unreachable!(),
-}
-# Ok::<(), fy_i18n_lang_tag::ParseError>(())
+const DEFAULT_LANG: NormalTagView<'static> = match NormalTagView::parse("en-US") {
+    Ok(tag) => tag,
+    Err(_) => unreachable!(),
+};
+
+assert_eq!(DEFAULT_LANG.language().as_str(), "en");
+assert_eq!(DEFAULT_LANG.region(), Some("US"));
 ```
 
-`ParseError` identifies the error category. Its `position` is a zero-based byte
-offset into the input:
+### Pure Private-Use Tags
 
 ```rust
-use fy_i18n_lang_tag::{NormalTag, ParseError};
+use fy_i18n_lang_tag::PrivateUseTag;
 
-assert_eq!(
-    NormalTag::parse("zh_CN"),
-    Err(ParseError::InvalidCharacter { position: 2 })
-);
+let priv_tag: PrivateUseTag = PrivateUseTag::parse("x-custom-engine")?;
+assert_eq!(priv_tag.as_str(), "custom-engine");
+assert_eq!(priv_tag.to_string(), "x-custom-engine");
+# Ok::<(), fy_i18n_lang_tag::private_use::TagError>(())
 ```
 
-## Validation and Normalization
+### Structural Language Matching
 
-Successful parsing means that the input matches this crate's supported syntax.
-It does not establish that subtags are registered or that their combination is
-appropriate. Grandfathered tags that also fit the supported syntax, such as
-`art-lojban`, are parsed literally without applying registry mappings.
+```rust
+use fy_i18n_lang_tag::{NormalTag, match_languages, MatchQuality};
 
-An extension consists of a single ASCII letter or digit other than `x`
-(case-insensitive), followed by one or more subtags of 2-8 ASCII letters or digits.
-Extension-specific rules,
-including Unicode `u` and `t` extension semantics and canonicalization, are not
-applied. Normalization is limited to casing and extension order as described
-above; it is not full registry-based or Unicode locale canonicalization.
+let requests: [NormalTag; 2] = [
+    NormalTag::parse("zh-Hans")?, // Priority 1
+    NormalTag::parse("en")?,      // Priority 2
+];
 
-The parser imposes no fixed total-length or subtag-count limit. Tags longer than
-255 bytes are supported, subject to available memory.
+let available: [NormalTag; 2] = [
+    NormalTag::parse("en-US")?,
+    NormalTag::parse("zh-Hans-CN")?,
+];
 
-`NormalTag::from_parts` constructs a tag from validated component types and
-returns `BuildError` for duplicate variants or extension singletons.
-`Extension::new` and `PrivateUseTag::new` also return `BuildError` for invalid
-component combinations. Construction errors describe component values or sequence
-indices; only string parsing returns `ParseError` with input byte offsets. Parsing,
-component construction, and transformations preserve the same invariants, so
-their output can be parsed again without changing the value.
-
-## Diagnostics and Ordering
-
-Lexical checks run before grammar checks. A left-to-right scan reports invalid
-characters as encountered and empty or overlong subtags at a separator or the
-end of input. The first detected lexical error wins. Grammar errors depend on
-the parser entry point and available grammar slots. For example, a second
-singleton starts another extension in a full tag, but is unexpected when parsing
-a single `Extension`. `PrivateUseTag::parse` requires an `x` prefix and reports
-`MissingPrivateUsePrefix` if it is absent after lexical validation.
-
-Ordering is structural, not displayed-string ordering. `NormalTag` compares
-language, script, region, variants, extensions, and private use in that order;
-`None` precedes `Some`, and sequences compare lexicographically. Thus `en-US`
-sorts before `en-Latn`. `Tag` places normal tags before private-use-only tags.
-
-## Optional Serde Support
-
-The `serde` feature enables string serialization and deserialization for all
-core types: `Tag`, `NormalTag`, `PrivateUseTag`, `Extension`, and the five atomic
-subtag types. Serialization uses the normalized `Display` representation;
-deserialization validates and normalizes through `parse`.
-
-```toml
-[dependencies]
-fy-i18n-lang-tag = { version = "0.1", features = ["serde"] }
+let matched = match_languages(&requests, &available).unwrap();
+assert_eq!(matched.request_index(), 0); // Matched zh-Hans
+assert_eq!(matched.candidate().to_string(), "zh-Hans-CN");
+assert_eq!(matched.quality(), MatchQuality::LanguageScript);
+# Ok::<(), fy_i18n_lang_tag::TagError>(())
 ```
+
+## Cargo Features
+
+| Feature | Default | Description |
+|---|---|---|
+| `alloc` | No | Enables heap-allocated [`Grow`] storage backend for unbounded tags. |
+| `serde` | No | Enables `Serialize` and `Deserialize` implementations for tags and views. |
+| `unsafe` | No | Enables unchecked string conversions for maximum projection throughput. |
+
+## MSRV
+
+The Minimum Supported Rust Version (MSRV) is **Rust 1.86.0**.
 
 ## License
 
-Licensed under either of the following, at your option:
+Licensed under either of:
 
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT license](LICENSE-MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

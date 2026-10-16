@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -23,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.98.0", stable]
+        toolchain: ["1.86.0", stable]
         features: ["--no-default-features", "--all-features"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -35,6 +36,11 @@ jobs:
         run: cargo +${{ matrix.toolchain }} test --locked ${{ matrix.features }}
       - name: Build library for standalone README tests
         run: cargo +${{ matrix.toolchain }} build --locked ${{ matrix.features }}
+      - name: Test English README examples
+        run: >-
+          rustdoc +${{ matrix.toolchain }} --test README.md --edition=2024
+          --extern fy_i18n_lang_tag=target/debug/libfy_i18n_lang_tag.rlib
+          -L dependency=target/debug/deps
       - name: Test Chinese README examples
         run: >-
           rustdoc +${{ matrix.toolchain }} --test README.zh-CN.md --edition=2024

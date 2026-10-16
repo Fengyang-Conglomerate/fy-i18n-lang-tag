@@ -1,9 +1,9 @@
 [package]
 name = "fy-i18n-lang-tag"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-rust-version = "1.98"
-description = "Lightweight modern language-tag parsing and normalization with no_std and no dependencies by default"
+rust-version = "1.86"
+description = "Lightweight modern BCP 47 language tag parsing, normalization, and matching (no_std, Safe Rust)"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bcp47", "rfc5646", "language-tag", "i18n", "localization"]
@@ -14,11 +14,13 @@ repository = "https://github.com/Fengyang-Conglomerate/fy-i18n-lang-tag"
 all-features = true
 
 [dependencies]
-serde = { version = "1", default-features = false, optional = true, features = ["alloc"] }
+serde = { version = "1", default-features = false, optional = true }
 
 [features]
 default = []
+alloc = ["serde?/alloc"]
 serde = ["dep:serde"]
+unsafe = []
 
 [dev-dependencies]
-serde_json = "1"
+serde = { version = "1", features = ["derive"] }
